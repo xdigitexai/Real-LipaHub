@@ -466,7 +466,8 @@ export async function getWorkerAssignment(workerId: string, assignmentId: string
 export async function listOpenTasks(filters?: { category?: string; search?: string }) {
   return prisma.task.findMany({
     where: {
-      status: "OPEN",
+      // OPEN (no assignments yet) and IN_PROGRESS (slots still available)
+      status: { in: ["OPEN", "IN_PROGRESS"] },
       ...(filters?.category ? { category: filters.category } : {}),
       ...(filters?.search ? { title: { contains: filters.search, mode: "insensitive" } } : {}),
     },

@@ -1,13 +1,16 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useActionState, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { registerAction, type ActionState } from "@/app/actions/auth";
 
-export default function RegisterPage() {
+function RegisterForm() {
   const router = useRouter();
-  const [role, setRole] = useState<"WORKER" | "BUSINESS">("WORKER");
+  const searchParams = useSearchParams();
+  const [role, setRole] = useState<"WORKER" | "BUSINESS">(
+    searchParams.get("role") === "business" ? "BUSINESS" : "WORKER",
+  );
   const [state, formAction, pending] = useActionState<ActionState | null, FormData>(registerAction, null);
 
   useEffect(() => {
@@ -61,5 +64,13 @@ export default function RegisterPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
   );
 }

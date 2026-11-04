@@ -19,7 +19,7 @@ import {
   approveWithdrawal,
   rejectWithdrawal,
 } from "@/modules/finance/service";
-import { createCampaign, createTask, applyToTask, decideApplication, submitWork, reviewSubmission, publishTask } from "@/modules/marketplace/service";
+import { createCampaign, createTask, applyToTask, decideApplication, submitWork, reviewSubmission, publishTask, listOpenTasks } from "@/modules/marketplace/service";
 import { registerUser } from "@/modules/identity/service";
 import { toMinor, commissionMinor } from "@/lib/money";
 import { env } from "@/lib/env";
@@ -305,6 +305,32 @@ describe("task reservation → approval → payout", () => {
     await expect(
       reviewSubmission({ submissionId: submission.submissionId, organizationId: biz.organizationId!, actorId: biz.userId, approve: true }),
     ).rejects.toThrow();
+  });
+
+  it("task with remaining slots stays discoverable after first acceptance (multi-slot)", async () => {
+    const { biz } = await seedScenario();
+    const w1 = await registerUser({ email: `multi1-${Date.now()}@test.local`, password: "password123", name: "Multi W1", role: "WORKER" });
+    const w2 = await registerUser({ email: `multi2-${Date.now()}@test.local`, password: "password123", name: "Multi W2", role: "WORKER" });
+    const campaign = await createCampaign({
+      organizationId: biz.organizationId!, actorId: biz.userId, title: "Multi-slot campaign", description: "Multi slot discovery campaign", category: "microtask", budgetMinor: toMinor(100),
+    });
+    await fundCampaign({ organizationId: biz.organizationId!, campaignId: campaign.id, amountMinor: toMinor(100), idempotencyKey: unique("fund"), payer: "254700000010" });
+    const task = await createTask({
+      campaignId: campaign.id, organizationId: biz.organizationId!, actorId: biz.userId,
+      title: `Multi-slot discovery task ${Date.now()}`, instructions: "Provide a link as evidence of work", deliverableSpec: "Link to deliverable",
+      category: "microtask", rewardMinor: toMinor(10), slotsTotal: 2,
+    });
+    await publishTask({ taskId: task.id, organizationId: biz.organizationId!, actorId: biz.userId });
+
+    // w1 accepted → task IN_PROGRESS, still discoverable for w2
+    const app1 = await applyToTask({ taskId: task.id, workerId: w1.userId });
+    await decideApplication({ applicationId: app1.id, organizationId: biz.organizationId!, actorId: biz.userId, accept: true });
+    const open = await listOpenTasks({ search: "Multi-slot discovery task" });
+    expect(open.some((t) => t.id === task.id)).toBe(true);
+
+    // w2 can still apply
+    const app2 = await applyToTask({ taskId: task.id, workerId: w2.userId });
+    expect(app2.status).toBe("PENDING");
   });
 
   it("duplicate evidence across workers is flagged (FAIL verdict, routed to review)", async () => {

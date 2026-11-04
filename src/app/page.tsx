@@ -28,8 +28,8 @@ export default async function LandingPage() {
           you can decide with full information.
         </p>
         <div className="lh-row" style={{ marginTop: "1.2rem" }}>
-          <Link className="lh-btn" href="/register">Join as a worker</Link>
-          <Link className="lh-btn lh-btn-secondary" href="/register">List work as a business</Link>
+          <Link className="lh-btn" href="/register?role=worker">Join as a worker</Link>
+          <Link className="lh-btn lh-btn-secondary" href="/register?role=business">List work as a business</Link>
         </div>
         <p className="lh-disclaimer" style={{ color: "rgba(255,255,255,0.6)", marginTop: "1rem" }}>
           LipaHub never promises guaranteed income. Earnings depend on the opportunities you

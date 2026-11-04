@@ -5,11 +5,16 @@ const globalForRedis = globalThis as unknown as { redis?: Redis };
 
 export function getRedis(): Redis {
   if (!globalForRedis.redis) {
-    globalForRedis.redis = new Redis(env.redisUrl, {
+    const client = new Redis(env.redisUrl, {
       maxRetriesPerRequest: 2,
       lazyConnect: false,
       enableOfflineQueue: false,
+      retryStrategy: () => null, // no endless reconnect spam when Redis is absent
     });
+    client.on("error", () => {
+      /* handled: rate limiting fails open when Redis is unreachable */
+    });
+    globalForRedis.redis = client;
   }
   return globalForRedis.redis;
 }
