@@ -42,6 +42,20 @@ export const env = {
     currency: optional("LIPAHUB_CURRENCY", "KES"),
   },
 
+  xdigitex: {
+    apiKey: optional("XDIGITEX_PAY_API_KEY", ""),
+    baseUrl: optional("XDIGITEX_PAY_BASE_URL", "https://pay.xdigitex.space/api"),
+    webhookSecret: optional("XDIGITEX_PAY_WEBHOOK_SECRET", ""),
+    timeoutMs: int("XDIGITEX_PAY_TIMEOUT_MS", 30_000),
+  },
+
+  appPublicUrl: optional("APP_PUBLIC_URL", "http://localhost:4310"),
+
+  withdrawals: {
+    minMinor: int("LIPAHUB_MIN_WITHDRAWAL_MINOR", 1000),
+    maxMinor: int("LIPAHUB_MAX_WITHDRAWAL_MINOR", 7_000_000),
+  },
+
   storageDir: optional("LIPAHUB_STORAGE_DIR", "./storage"),
 } as const;
 

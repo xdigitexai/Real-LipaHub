@@ -53,8 +53,13 @@ export async function scheduleOperationsSweep(): Promise<void> {
       name: "sweep",
       data: {},
     });
+    await getQueue(QUEUE_NAMES.operations).upsertJobScheduler("payments-reconcile", { every: 5 * 60_000 }, {
+      name: "payments-reconcile",
+      data: {},
+    });
     return;
   }
   await ensurePgJobTable();
   await pgScheduleRecurring(QUEUE_NAMES.operations, "sweep", {}, 5 * 60_000);
+  await pgScheduleRecurring(QUEUE_NAMES.operations, "payments-reconcile", {}, 5 * 60_000);
 }

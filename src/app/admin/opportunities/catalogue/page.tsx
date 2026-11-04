@@ -18,6 +18,9 @@ export default async function AdminCataloguePage() {
   return (
     <Shell nav={[
       { href: "/admin", label: "Overview" },
+      { href: "/admin/payments", label: "Payments" },
+      { href: "/admin/payments/reconciliation", label: "Reconciliation" },
+      { href: "/admin/payments/settings", label: "Payment settings" },
       { href: "/admin/opportunities/sources", label: "Opportunity sources" },
       { href: "/admin/opportunities/moderation", label: "Moderation queue" },
       { href: "/admin/opportunities/catalogue", label: "Catalogue" },

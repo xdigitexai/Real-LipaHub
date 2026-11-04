@@ -2,9 +2,11 @@ import { notFound } from "next/navigation";
 import { Shell, StatusBadge } from "@/components/shell";
 import { prisma } from "@/lib/db";
 import { getAuthContext } from "@/lib/session-server";
-import { campaignHeldBalance } from "@/modules/finance";
+import { campaignHeldBalance, orgWalletBalance } from "@/modules/finance";
+import { isXdigitexConfigured } from "@/modules/payments";
 import { formatMoney } from "@/lib/money";
 import { FundCampaignForm, CreateTaskForm } from "@/components/business-forms";
+import { FundFromWalletForm } from "@/components/payment-forms";
 import { publishTaskAction, cancelTaskAction } from "@/app/actions/platform";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +21,11 @@ export default async function CampaignDetail({ params }: { params: Promise<{ id:
   });
   if (!campaign || campaign.organizationId !== ctx.organizationId) notFound();
 
-  const held = await prisma.$transaction((tx) => campaignHeldBalance(tx, campaign.id));
+  const [held, wallet, providerConfigured] = await Promise.all([
+    prisma.$transaction((tx) => campaignHeldBalance(tx, campaign.id)),
+    prisma.$transaction((tx) => orgWalletBalance(tx, ctx.organizationId!)),
+    Promise.resolve(isXdigitexConfigured()),
+  ]);
 
   return (
     <Shell nav={[
@@ -40,8 +46,17 @@ export default async function CampaignDetail({ params }: { params: Promise<{ id:
       <div className="lh-grid lh-grid-2">
         <div className="lh-card">
           <h3 style={{ marginTop: 0 }}>Fund this campaign</h3>
-          <p className="lh-muted">Funding moves money into “campaign funds held”. Publishing payable tasks reserves rewards from this balance (escrow).</p>
-          <FundCampaignForm campaignId={campaign.id} />
+          {providerConfigured ? (
+            <>
+              <p className="lh-muted">Funding moves money from your organization wallet into “campaign funds held”. Publishing payable tasks reserves rewards from this balance (escrow).</p>
+              <FundFromWalletForm campaignId={campaign.id} walletBalance={Number(wallet) / 100} currency={campaign.currency} />
+            </>
+          ) : (
+            <>
+              <p className="lh-muted"><strong>Sandbox mode</strong> — simulated instant funding, no real money. Publishing payable tasks reserves rewards from this balance (escrow).</p>
+              <FundCampaignForm campaignId={campaign.id} />
+            </>
+          )}
         </div>
         <div className="lh-card">
           <h3 style={{ marginTop: 0 }}>Funding history</h3>

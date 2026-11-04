@@ -2,9 +2,11 @@ import { Shell, StatusBadge } from "@/components/shell";
 import { prisma } from "@/lib/db";
 import { getAuthContext } from "@/lib/session-server";
 import { listCampaignsForOrg } from "@/modules/marketplace";
-import { campaignHeldBalance } from "@/modules/finance";
+import { campaignHeldBalance, orgWalletBalance } from "@/modules/finance";
+import { isXdigitexConfigured, getEnabledGateways, getRecommendedGateway } from "@/modules/payments";
 import { formatMoney } from "@/lib/money";
 import { CreateCampaignForm } from "@/components/business-forms";
+import { DepositForm } from "@/components/payment-forms";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Business dashboard — LipaHub AI" };
@@ -21,6 +23,11 @@ export default async function BusinessOverview() {
     }
     return map;
   });
+
+  const wallet = await prisma.$transaction(async (tx) => orgWalletBalance(tx, org.id));
+  const providerConfigured = isXdigitexConfigured();
+  const gateways = providerConfigured ? await getEnabledGateways() : [];
+  const recommended = await getRecommendedGateway();
 
   const pendingSubmissions = await prisma.submission.count({
     where: { assignment: { task: { campaign: { organizationId: org.id } } }, status: { in: ["PENDING", "AUTO_VERIFIED", "NEEDS_REVIEW"] } },
@@ -45,6 +52,11 @@ export default async function BusinessOverview() {
 
       <div className="lh-grid lh-grid-3">
         <div className="lh-card">
+          <div className="lh-stat-label">Organization wallet</div>
+          <div className="lh-stat lh-mono">{formatMoney(wallet, org.currency)}</div>
+          <div className="lh-muted">Deposits land here after provider verification; campaigns are funded from this wallet.</div>
+        </div>
+        <div className="lh-card">
           <div className="lh-stat-label">Campaigns</div>
           <div className="lh-stat">{campaigns.length}</div>
         </div>
@@ -57,6 +69,25 @@ export default async function BusinessOverview() {
           <div className="lh-stat">{pendingSubmissions}</div>
           <a href="/business/reviews">Review now →</a>
         </div>
+      </div>
+
+      <h2>Deposit to organization wallet</h2>
+      <div className="lh-card">
+        {org.verificationStatus !== "VERIFIED" ? (
+          <p className="lh-muted">Your organization must be verified before depositing.</p>
+        ) : providerConfigured ? (
+          <>
+            <p className="lh-muted">Payments are processed by <strong>Xdigitex Pay</strong> (server-side, key never exposed). Mobile-money confirmations land automatically once the provider verifies the transaction.</p>
+            <DepositForm gateways={gateways} recommended={recommended} currency={org.currency} />
+          </>
+        ) : (
+          <>
+            <div className="lh-alert lh-alert-warn">
+              <strong>Sandbox mode</strong> — no payment provider API key is configured. Campaign funding via the campaign page is instant and simulated; it never touches real money. Configure <code>XDIGITEX_PAY_API_KEY</code> to enable real deposits to this wallet.
+            </div>
+            <p className="lh-muted">Open a campaign below to fund it in sandbox mode.</p>
+          </>
+        )}
       </div>
 
       <h2>Campaigns</h2>

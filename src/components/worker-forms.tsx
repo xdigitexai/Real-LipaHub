@@ -1,7 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
-import { applyToTaskAction, submitWorkAction, requestWithdrawalAction } from "@/app/actions/platform";
+import { useActionState, useState } from "react";
+import { applyToTaskAction, submitWorkAction } from "@/app/actions/platform";
+import { requestWithdrawalWithFeeAction } from "@/app/actions/payments";
 import { SubmitButton, FormMessage } from "@/components/forms";
 import type { ActionState } from "@/app/actions/auth";
 
@@ -49,17 +50,25 @@ export function SubmitWorkForm({ assignmentId, evidenceRequirements }: { assignm
 }
 
 export function WithdrawalForm({ maxAmount }: { maxAmount: number }) {
-  const [state, action] = useActionState<ActionState | null, FormData>(requestWithdrawalAction, null);
+  const [state, action] = useActionState<ActionState | null, FormData>(requestWithdrawalWithFeeAction, null);
+  const [amount, setAmount] = useState("");
+  const fee = Number.isFinite(Number(amount)) && Number(amount) > 0 ? (Number(amount) * 0.03).toFixed(2) : "0.00";
+  const net = Number.isFinite(Number(amount)) && Number(amount) > 0 ? (Number(amount) * 0.97).toFixed(2) : "0.00";
   return (
     <form action={action} className="lh-form">
       <div className="lh-field">
         <label className="lh-label" htmlFor="amount">Amount (KES)</label>
-        <input className="lh-input" id="amount" name="amount" type="number" step="0.01" min="1" max={(maxAmount / 100).toFixed(2)} required />
-        <span className="lh-muted">Available: {(maxAmount / 100).toFixed(2)} KES</span>
+        <input className="lh-input" id="amount" name="amount" type="number" step="0.01" min="10" max={(maxAmount / 100).toFixed(2)} required
+          value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <span className="lh-muted">Available: {(maxAmount / 100).toFixed(2)} KES · Minimum 10.00 KES</span>
       </div>
       <div className="lh-field">
-        <label className="lh-label" htmlFor="destination">M-Pesa number</label>
-        <input className="lh-input" id="destination" name="destination" placeholder="2547XXXXXXXX" required />
+        <label className="lh-label" htmlFor="destination">M-Pesa number (international format)</label>
+        <input className="lh-input" id="destination" name="destination" placeholder="+254712345678" required />
+      </div>
+      <div className="lh-alert lh-alert-info" style={{ margin: 0 }}>
+        Provider withdrawal fee (3%): <strong>{fee} KES</strong> · Net payout to your phone: <strong>{net} KES</strong>
+        <div className="lh-muted">Paid via mobile_money through the payment provider after administrator approval.</div>
       </div>
       <FormMessage state={state} />
       <SubmitButton pendingLabel="Requesting…">Request withdrawal</SubmitButton>

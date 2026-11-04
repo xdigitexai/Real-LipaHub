@@ -49,11 +49,21 @@ async function handleOperationsSweep(): Promise<unknown> {
   return { staleRuns: stale.count, failingSources };
 }
 
+async function handlePaymentReconciliation(): Promise<unknown> {
+  // Authoritative status checks for pending deposits/withdrawals. Money
+  // moves only when the provider confirms; uncertain outcomes are flagged
+  // for admin review, never retried automatically.
+  const { reconcilePendingPayments } = await import("@/modules/payments/service");
+  const report = await reconcilePendingPayments();
+  logger.info("job_reconciliation_done", { ...report });
+  return report;
+}
+
 const handlers: Record<QueueName, Record<string, Handler>> = {
   discovery: { "ingest-source": handleIngestSource },
   evaluation: {},
   verification: {},
-  operations: { sweep: () => handleOperationsSweep() },
+  operations: { sweep: () => handleOperationsSweep(), "payments-reconcile": () => handlePaymentReconciliation() },
 };
 
 async function runPgDriverLoop(): Promise<void> {

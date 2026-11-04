@@ -1,7 +1,79 @@
-# LipaHub AI — Milestone 0 Implementation Report
+# LipaHub AI — Implementation Report
 
-> Date: 2026-11-04 · Status: Foundation + first vertical slice **implemented, tested and browser-verified**
-> Commits: `66c776c` (foundation) · `ebe387b` (E2E fixes)
+> Milestone 0: 2026-11-04 · Milestone 1 (Xdigitex Pay): 2026-11-05
+> Status: foundation + payment-provider integration **implemented, tested and browser-verified**
+
+---
+
+# Milestone 1 — Xdigitex Pay integration (2026-11-05)
+
+## 1. Documentation grounding (verified against the live docs)
+
+Fetched https://pay.xdigitex.space/docs before writing code. Implemented exactly the published surface:
+
+| Documented | Implemented |
+|---|---|
+| `POST /payments/initiate` (fields incl. `email`, `first_name`, `last_name`) | ✅ all fields sent; response parsed with zod (reference, fee, net_amount, redirect_url, deposit_id/pawa_status/correspondent, checkout_url/qrcode_link) |
+| `GET /payments/{reference}/status` | ✅ authoritative verification source for every webhook + reconciliation |
+| `GET /balance` | ✅ admin reconciliation + connection test |
+| `POST /withdrawals` (`method: "mobile_money"`) | ✅ two-phase withdrawal submission |
+| `GET /withdrawals` (paginated history) | ✅ withdrawal reconciliation (see gap #1) |
+| Statuses `pending/processing/completed/failed` | ✅ mapped to internal states incl. `UNCERTAIN` |
+| Gateways `safaricom/airtel/card/mobile/crypto` | ✅ selectable, admin-toggleable, M-Pesa recommended for KES |
+| Deposit fee returned in response (docs example 12%) | ✅ stored per transaction; **wallet is credited NET** so internal `provider-clearing` mirrors the real provider wallet |
+
+**Documented gaps and the safe fallbacks built for each (nothing guessed):**
+1. **No webhook signature scheme published** → webhook payloads are NEVER trusted: every delivery is verified against `GET /payments/{reference}/status` (reference + amount + currency + status must all agree). Additionally, if `XDIGITEX_PAY_WEBHOOK_SECRET` is set, requests must carry a matching `X-Webhook-Secret` header (our convention, documented in the admin settings page). Rejections are audited.
+2. **No single-withdrawal status endpoint** → withdrawal final status is resolved from the paginated `GET /withdrawals` history; references absent from history for 30+ minutes become **UNCERTAIN** for admin review and are **never resubmitted automatically** (double-payout protection).
+3. **`callback_url` payload format unspecified** → the browser callback page (`/payment/callback`) displays no payment state and never credits anything.
+4. **No error-code schema / no idempotency guidance** → non-2xx or unparseable responses are treated as initiation failure with raw responses stored; all money-moving operations are idempotent via ledger idempotency keys.
+
+## 2. What was built
+
+- **Adapter** `src/modules/payments/xdigitex.ts` — server-side-only client (`X-API-Key` from env), strict zod response validation, injectable `fetchImpl` for tests, timeout/HTTP/invalid-response error taxonomy.
+- **Payments service** `src/modules/payments/service.ts` — deposit initiation (internal `PaymentRecord` written **before** any provider call), webhook processing (idempotent, verified), reconciliation sweeps, two-phase withdrawals (reserve → submit → settle/reverse), wallet→campaign funding, provider-balance snapshot, connection test (never reveals the key).
+- **Ledger** — new accounts/journals: `org-funds-held` wallet, `ORG_DEPOSIT`, `WALLET_TO_CAMPAIGN`, `WITHDRAWAL_RESERVE`, `WITHDRAWAL_REVERSAL`; entry-level reference attribution (with backfill migration for pre-existing rows).
+- **Routes** — `POST /api/webhooks/xdigitex` (secret-gated, rate-limited, audited `WebhookDelivery` records), `GET /api/payments/{ref}/status` (auth-scoped polling), `/payment/callback` (neutral landing).
+- **UI** — business wallet + deposit panel (STK "check your phone" with live polling, redirect/crypto handoff), fund-campaign-from-wallet, worker withdrawal form with **3% fee + net payout shown before confirmation**, admin Payments dashboard (deposits/withdrawals/webhooks/provider balance/pending/uncertain), Reconciliation page (provider vs internal, safe sweep), Payment settings (masked key status, connection test, gateway toggles, withdrawal limits).
+- **Worker** — reconciliation sweep every 5 minutes on both queue drivers.
+- **Schema** — `PaymentRecord`, `WebhookDelivery`, `PlatformSetting` + migrations (`20261104204814_xdigitex_payments`, entry-refs, `20261105000000_backfill_entry_refs`).
+
+## 3. Environment configuration
+
+```
+XDIGITEX_PAY_API_KEY=pg_xxx          # server-side only; empty = local sandbox mode
+XDIGITEX_PAY_BASE_URL=https://pay.xdigitex.space/api
+XDIGITEX_PAY_WEBHOOK_SECRET=...      # optional; our X-Webhook-Secret convention
+XDIGITEX_PAY_TIMEOUT_MS=30000
+APP_PUBLIC_URL=https://yourdomain    # builds callback_url / webhook_url
+LIPAHUB_MIN_WITHDRAWAL_MINOR=1000    # admin-editable at runtime via settings page
+LIPAHUB_MAX_WITHDRAWAL_MINOR=7000000
+```
+Webhook endpoint to register with the provider: `https://<APP_PUBLIC_URL>/api/webhooks/xdigitex`. The key is read from env at call time only — never stored in DB, never rendered, never logged.
+
+## 4. Tests & verification
+
+- **53/53 vitest tests pass** (30 pre-existing untouched + 23 new payment-integration tests): successful M-Pesa/Airtel/card/mobile deposits, failed payment, duplicate webhook, forged reference, amount mismatch, currency mismatch, delayed confirmation via reconciliation, provider timeout during verification, initiation failure, webhook-secret enforcement, withdrawal success/failure/duplicate-refusal, uncertain-withdrawal handling, ledger idempotency, wallet→campaign escrow, tenant isolation, wallet-overdraft rejection, provider-wallet reconciliation (delta 0), global journal-balance sweep, fee rounding.
+- `tsc --noEmit` clean; `next build` succeeds with all payment routes.
+- **Browser E2E (local mock provider emulating the documented API + firing real webhooks with the secret):** business deposit 1000 KES via M-Pesa STK → "check your phone" → webhook verified → wallet credited **880.00 KES net** → campaign funded 500 KES from wallet (`WALLET_TO_CAMPAIGN`) → worker withdrawal 20 KES with fee disclosure → admin "Approve & submit to provider" → reserve journal → provider `processing` → provider completed → admin reconciliation sweep → **PAID**, worker balance 5.00 KES. The reconciliation page correctly flagged the (test-data) delta for investigation instead of silently accepting it.
+
+## 5. Honest testing status
+
+| Integration | Status |
+|---|---|
+| Adapter contract, webhook verification, reconciliation, two-phase withdrawals, ledger integration | ✅ tested (mocked provider responses + browser E2E against a local mock emulating the documented API) |
+| Real provider sandbox (`https://pay.xdigitex.space`) | ⚠️ **not yet exercised** — requires a KYC-verified account and `pg_...` API key. The admin "Test provider connection" button (`GET /balance`) is the designated first live check; go-live checklist: verify initiate → webhook delivery → status verification with real M-Pesa STK before enabling real funding. |
+| Live money | 🚫 intentionally unreachable — sandbox/simulated modes only until the above is verified. |
+
+## 6. Defects found & fixed during M1
+
+- Entry-level ledger references were NULL for pre-M1 rows → backfill migration applied (balances restored).
+- Withdrawal history fetch initially missed the `?page=` query in the mock → fixed in tests; confirmed adapter sends the documented path.
+- Dev-server restart kept the old process (port conflict) during E2E → killed by port PID; not a code defect.
+
+---
+
+# Milestone 0 — Foundation (2026-11-04)
 
 ## 1. Environment decision (honest audit)
 

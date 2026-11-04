@@ -18,6 +18,7 @@ import type { JournalKind, Prisma } from "@prisma/client";
 
 export const ACCOUNTS = {
   providerClearing: { code: "provider-clearing", name: "Provider clearing (cash in/out)", kind: "ASSET" as const },
+  orgFundsHeld: { code: "org-funds-held", name: "Organization wallet (deposited funds)", kind: "LIABILITY" as const },
   campaignFundsHeld: { code: "campaign-funds-held", name: "Campaign funds held (unreserved)", kind: "LIABILITY" as const },
   taskEscrow: { code: "task-escrow", name: "Task escrow (reserved rewards)", kind: "LIABILITY" as const },
   workerPayable: { code: "worker-payable", name: "Worker payable (earnings)", kind: "LIABILITY" as const },
@@ -31,6 +32,9 @@ export interface JournalLine {
   account: AccountCode;
   debit?: bigint;
   credit?: bigint;
+  /** Entry-level attribution; defaults to the journal's reference. */
+  referenceType?: string;
+  referenceId?: string;
 }
 
 export interface PostJournalInput {
@@ -116,6 +120,8 @@ export async function postJournal(
           direction: (l.debit ?? 0n) > 0n ? "DEBIT" : "CREDIT",
           amountMinor: (l.debit ?? 0n) > 0n ? l.debit! : l.credit!,
           accountCode: l.account,
+          referenceType: l.referenceType ?? input.referenceType,
+          referenceId: l.referenceId ?? input.referenceId,
         })),
       },
     },
@@ -161,11 +167,62 @@ export async function campaignHeldBalance(tx: Prisma.TransactionClient, campaign
   return (funding._sum.amountMinor ?? 0n) - (reserved._sum.amountMinor ?? 0n);
 }
 
+/** Organization wallet balance: deposits in − wallet-to-campaign movements out (entry-level refs). */
+export async function orgWalletBalance(tx: Prisma.TransactionClient, organizationId: string): Promise<bigint> {
+  const agg = await tx.ledgerEntry.groupBy({
+    by: ["direction"],
+    where: {
+      accountCode: ACCOUNTS.orgFundsHeld.code,
+      referenceType: "organization",
+      referenceId: organizationId,
+    },
+    _sum: { amountMinor: true },
+  });
+  let debits = 0n;
+  let credits = 0n;
+  for (const row of agg) {
+    const amt = row._sum.amountMinor ?? 0n;
+    if (row.direction === "DEBIT") debits += amt;
+    else credits += amt;
+  }
+  return credits - debits;
+}
+
+/**
+ * Moves wallet funds onto a campaign (org wallet → campaign held).
+ * Called inside the campaign-funding transaction; the campaign reservation
+ * mechanics are unchanged downstream.
+ */
+export async function fundCampaignFromWallet(tx: Prisma.TransactionClient, params: {
+  organizationId: string;
+  campaignId: string;
+  amountMinor: bigint;
+  actorId?: string;
+  idempotencyKey: string;
+}): Promise<{ journalId: string; replayed: boolean }> {
+  const balance = await orgWalletBalance(tx, params.organizationId);
+  if (balance < params.amountMinor) {
+    throw Errors.unprocessable(`Insufficient wallet balance: available=${balance} required=${params.amountMinor}`);
+  }
+  return postJournal(tx, {
+    kind: "WALLET_TO_CAMPAIGN",
+    memo: `Campaign funding from organization wallet`,
+    referenceType: "campaign",
+    referenceId: params.campaignId,
+    idempotencyKey: params.idempotencyKey,
+    postedById: params.actorId,
+    lines: [
+      { account: ACCOUNTS.orgFundsHeld.code, debit: params.amountMinor },
+      { account: ACCOUNTS.campaignFundsHeld.code, credit: params.amountMinor },
+    ],
+  });
+}
+
 /** Worker's withdrawable earnings (ledger-derived — never a stored column). */
 export async function workerPayableBalance(tx: Prisma.TransactionClient, workerId: string): Promise<bigint> {
   const agg = await tx.ledgerEntry.groupBy({
     by: ["direction"],
-    where: { accountCode: ACCOUNTS.workerPayable.code, journal: { referenceType: "worker", referenceId: workerId } },
+    where: { accountCode: ACCOUNTS.workerPayable.code, referenceType: "worker", referenceId: workerId },
     _sum: { amountMinor: true },
   });
   let debits = 0n;

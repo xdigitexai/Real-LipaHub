@@ -428,6 +428,8 @@ model LedgerAccount {
 
 enum JournalKind {
   CAMPAIGN_FUNDING
+  ORG_DEPOSIT
+  WALLET_TO_CAMPAIGN
   TASK_RESERVATION
   RESERVATION_RELEASE_TO_WORKER
   RESERVATION_RELEASE_BACK
@@ -435,6 +437,8 @@ enum JournalKind {
   COMMISSION
   WITHDRAWAL_REQUEST
   WITHDRAWAL_EXECUTED
+  WITHDRAWAL_RESERVE
+  WITHDRAWAL_REVERSAL
   REFUND
   ADJUSTMENT
 }
@@ -468,6 +472,8 @@ model LedgerEntry {
   direction     EntryDirection
   amountMinor   BigInt
   accountCode   String
+  referenceType String?
+  referenceId   String?
   createdAt     DateTime @default(now())
 
   journal LedgerJournal @relation(fields: [journalId], references: [id])
@@ -565,6 +571,86 @@ model PaymentTransaction {
   updatedAt   DateTime @updatedAt
 
   @@index([provider, externalRef])
+}
+
+// ─────────────────────── Xdigitex Pay integration ───────────────────────
+
+enum PaymentRecordStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REVERSED
+  UNCERTAIN
+}
+
+enum PaymentRecordKind {
+  DEPOSIT
+  WITHDRAWAL
+}
+
+/// Internal payment transaction record. Written BEFORE any provider call.
+/// Ledger movement happens ONLY after authoritative provider verification.
+model PaymentRecord {
+  id             String  @id @default(cuid())
+  internalRef    String  @unique
+  providerRef    String? @unique
+  kind           PaymentRecordKind
+  gateway        String?
+  provider       String  @default("xdigitex")
+  organizationId String?
+  workerId       String?
+  campaignId     String?
+  initiatedById  String
+  amountMinor    BigInt
+  feeMinor       BigInt  @default(0)
+  netMinor       BigInt?
+  currency       String  @default("KES")
+  status         PaymentRecordStatus @default(PENDING)
+  providerResponse Json?
+  failureReason  String?
+  journalId      String?
+  settledAt      DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([status])
+  @@index([kind, status])
+  @@index([organizationId])
+  @@index([workerId])
+}
+
+/// Every inbound webhook delivery with its processing outcome (audit).
+enum WebhookDeliveryStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  REJECTED
+  FAILED
+}
+
+model WebhookDelivery {
+  id          String @id @default(cuid())
+  provider    String @default("xdigitex")
+  eventType   String
+  reference   String?
+  payload     Json
+  signaturePresent Boolean @default(false)
+  status      WebhookDeliveryStatus @default(RECEIVED)
+  outcome     String?
+  relatedPaymentId String?
+  ip          String?
+  createdAt   DateTime @default(now())
+
+  @@index([reference])
+  @@index([status])
+}
+
+/// Runtime platform settings (non-secret) editable by admins.
+model PlatformSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 // ─────────────────────────── AI orchestration ───────────────────────────

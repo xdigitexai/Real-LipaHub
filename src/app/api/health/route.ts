@@ -26,5 +26,8 @@ export async function GET() {
   const aiConfigured = Boolean(process.env.LIPAHUB_AI_API_KEY);
   checks.ai = { status: aiConfigured ? "configured" : "not-configured", note: aiConfigured ? undefined : "agents fall back to deterministic + human review" };
 
+  // Provider config visibility (boolean only — the key itself is never exposed)
+  checks.payments = { provider: "xdigitex", configured: Boolean(process.env.XDIGITEX_PAY_API_KEY) };
+
   return NextResponse.json({ status: ok ? "healthy" : "unhealthy", ts: new Date().toISOString(), checks }, { status: ok ? 200 : 503 });
 }
