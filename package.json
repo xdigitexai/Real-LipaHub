@@ -1,0 +1,53 @@
+{
+  "name": "lipahub-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LipaHub AI - intelligent earning automation engine and digital work marketplace",
+  "scripts": {
+    "dev": "next dev -p 4310",
+    "build": "next build",
+    "start": "next start -p 4310",
+    "infra": "tsx scripts/dev-infra.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "prisma generate",
+    "db:validate": "prisma validate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:seed": "tsx scripts/seed.ts",
+    "worker": "tsx src/jobs/worker.ts"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "2.2.1",
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "bullmq": "6.3.9",
+    "decimal.js": "10.6.0",
+    "dotenv": "17.2.3",
+    "ioredis": "6.0.0",
+    "lucide-react": "1.48.0",
+    "next": "16.3.6",
+    "pg": "8.16.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@embedded-postgres/windows-x64": "^17.9.0-beta.17",
+    "@types/node": "24.10.1",
+    "@types/pg": "8.15.6",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "embedded-postgres": "^17.9.0-beta.17",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.6",
+    "prisma": "7.10.0",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vitest": "5.0.2"
+  }
+}

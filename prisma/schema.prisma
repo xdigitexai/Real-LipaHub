@@ -1,0 +1,669 @@
+// LipaHub AI — Prisma schema (PostgreSQL 17)
+// All monetary amounts are integer minor units (cents) — never floats.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Identity ─────────────────────────────
+
+enum UserRole {
+  ADMIN
+  BUSINESS
+  WORKER
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  emailNormalized String  @unique
+  passwordHash String
+  name         String
+  role         UserRole
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  sessions        Session[]
+  organization    Organization?  @relation("OrgOwner")
+  workerProfile   WorkerProfile?
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+  assignments     Assignment[]   @relation("WorkerAssignments")
+  applications    Application[]
+  withdrawalRequests WithdrawalRequest[]
+  disputesOpened  Dispute[]      @relation("DisputeOpener")
+  postedJournals  LedgerJournal[] @relation("PostedBy")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Organization {
+  id                 String   @id @default(cuid())
+  name               String
+  ownerId            String   @unique
+  country            String   @default("KE")
+  currency           String   @default("KES")
+  description        String?
+  website            String?
+  verificationStatus OrgVerificationStatus @default(PENDING)
+  verificationNote   String?
+  verifiedAt         DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  owner    User      @relation("OrgOwner", fields: [ownerId], references: [id])
+  campaigns Campaign[]
+  fundingRecords FundingRecord[]
+
+  @@index([verificationStatus])
+}
+
+enum OrgVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+model WorkerProfile {
+  id              String  @id @default(cuid())
+  userId          String  @unique
+  headline        String?
+  skills          String[]
+  country         String  @default("KE")
+  experienceLevel String  @default("BEGINNER")
+  availability    String  @default("AVAILABLE")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+// ──────────────────────────── Marketplace ────────────────────────────
+
+enum CampaignStatus {
+  DRAFT
+  FUNDED
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+model Campaign {
+  id             String  @id @default(cuid())
+  organizationId String
+  title          String
+  description    String
+  category       String
+  status         CampaignStatus @default(DRAFT)
+  budgetMinor    BigInt
+  currency       String  @default("KES")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  tasks        Task[]
+  fundingRecords FundingRecord[]
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+enum TaskStatus {
+  DRAFT
+  PENDING_FUNDING
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  PAUSED
+  CANCELLED
+}
+
+model Task {
+  id                   String   @id @default(cuid())
+  campaignId           String
+  title                String
+  instructions         String
+  deliverableSpec      String
+  category             String
+  rewardMinor          BigInt
+  slotsTotal           Int
+  slotsTaken           Int      @default(0)
+  status               TaskStatus @default(DRAFT)
+  geoAllow             String[]
+  skillsRequired       String[]
+  evidenceRequirements String[]
+  publishedAt          DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  campaign    Campaign      @relation(fields: [campaignId], references: [id])
+  reservations TaskReservation[]
+  applications Application[]
+  assignments Assignment[]
+
+  @@index([campaignId])
+  @@index([status])
+}
+
+enum ReservationStatus {
+  HELD
+  RELEASED_TO_WORKER
+  RELEASED_BACK
+}
+
+model TaskReservation {
+  id          String @id @default(cuid())
+  taskId      String @unique
+  campaignId  String
+  amountMinor BigInt
+  status      ReservationStatus @default(HELD)
+  journalId   String
+  createdAt   DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id])
+}
+
+enum ApplicationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+model Application {
+  id        String   @id @default(cuid())
+  taskId    String
+  workerId  String
+  message   String?
+  status    ApplicationStatus @default(PENDING)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task       Task        @relation(fields: [taskId], references: [id])
+  worker     User        @relation(fields: [workerId], references: [id])
+  assignment Assignment?
+
+  @@unique([taskId, workerId])
+  @@index([workerId])
+}
+
+enum AssignmentStatus {
+  ACTIVE
+  SUBMITTED
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  DISPUTED
+  CANCELLED
+}
+
+model Assignment {
+  id            String    @id @default(cuid())
+  taskId        String
+  workerId      String
+  applicationId String   @unique
+  status        AssignmentStatus @default(ACTIVE)
+  deadlineAt    DateTime?
+  approvedAt    DateTime?
+  payoutMinor   BigInt?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  task        Task        @relation(fields: [taskId], references: [id])
+  worker      User        @relation("WorkerAssignments", fields: [workerId], references: [id])
+  application Application @relation(fields: [applicationId], references: [id])
+  submissions Submission[]
+  disputes    Dispute[]
+
+  @@unique([taskId, workerId])
+  @@index([workerId])
+}
+
+enum SubmissionStatus {
+  PENDING
+  AUTO_VERIFIED
+  NEEDS_REVIEW
+  APPROVED
+  REJECTED
+}
+
+model Submission {
+  id           String   @id @default(cuid())
+  assignmentId String   @unique
+  notes        String?
+  evidence     Json
+  contentHash  String
+  status       SubmissionStatus @default(PENDING)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignment      Assignment       @relation(fields: [assignmentId], references: [id])
+  verificationRuns VerificationRun[]
+
+  @@index([contentHash])
+}
+
+enum Verdict {
+  PASS
+  FAIL
+  UNCERTAIN
+}
+
+enum VerificationEngine {
+  DETERMINISTIC
+  AI
+  HUMAN
+}
+
+model VerificationRun {
+  id          String @id @default(cuid())
+  submissionId String
+  engine      VerificationEngine
+  checks      Json
+  confidence  Int
+  verdict     Verdict
+  escalated   Boolean @default(false)
+  reviewerId  String?
+  createdAt   DateTime @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id])
+
+  @@index([submissionId])
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED_WORKER
+  RESOLVED_BUSINESS
+  RESOLVED_SPLIT
+  CLOSED
+}
+
+model Dispute {
+  id            String @id @default(cuid())
+  assignmentId  String
+  openedById    String
+  reason        String
+  status        DisputeStatus @default(OPEN)
+  resolution    String?
+  resolvedById  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id])
+  opener     User       @relation("DisputeOpener", fields: [openedById], references: [id])
+
+  @@index([status])
+}
+
+// ─────────────────────── Opportunity intelligence ───────────────────────
+
+enum SourceKind {
+  RSS
+  HTML
+  API
+  MANUAL
+}
+
+enum SourceTrustLevel {
+  UNTRUSTED
+  NEUTRAL
+  TRUSTED
+}
+
+model OpportunitySource {
+  id                    String  @id @default(cuid())
+  name                  String  @unique
+  kind                  SourceKind
+  url                   String?
+  config                Json?
+  fetchIntervalMinutes  Int     @default(60)
+  trustLevel            SourceTrustLevel @default(NEUTRAL)
+  robotsRespected       Boolean @default(true)
+  enabled               Boolean @default(true)
+  lastFetchedAt         DateTime?
+  lastFetchStatus       String?
+  consecutiveFailures   Int     @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  opportunities DiscoveredOpportunity[]
+
+  @@index([enabled])
+}
+
+enum OpportunityStatus {
+  DISCOVERED
+  EVALUATED
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  PUBLISHED
+}
+
+enum RiskBand {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model DiscoveredOpportunity {
+  id               String  @id @default(cuid())
+  sourceId         String
+  title            String
+  description      String
+  url              String?
+  urlHash          String
+  titleFuzzyHash   String
+  requirements     Json?
+  rewardText       String?
+  eligibility      String?
+  geoRestrictions  String[]
+  riskScore        Int     @default(50)
+  riskBand         RiskBand @default(MEDIUM)
+  riskSignals      Json?
+  confidence       Int     @default(0)
+  duplicateOfId    String?
+  status           OpportunityStatus @default(DISCOVERED)
+  publishedTaskId  String?
+  aiRunId          String?
+  reviewedById     String?
+  reviewNote       String?
+  fetchedAt        DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  source OpportunitySource @relation(fields: [sourceId], references: [id])
+
+  @@unique([sourceId, urlHash])
+  @@index([status])
+  @@index([titleFuzzyHash])
+}
+
+// ────────────────────────────── Finance ──────────────────────────────
+
+enum AccountKind {
+  ASSET
+  LIABILITY
+  REVENUE
+  EXPENSE
+  EQUITY
+}
+
+model LedgerAccount {
+  id   String @id @default(cuid())
+  code String @unique
+  name String
+  kind AccountKind
+  createdAt DateTime @default(now())
+
+  entries LedgerEntry[]
+}
+
+enum JournalKind {
+  CAMPAIGN_FUNDING
+  TASK_RESERVATION
+  RESERVATION_RELEASE_TO_WORKER
+  RESERVATION_RELEASE_BACK
+  REWARD_PAYOUT
+  COMMISSION
+  WITHDRAWAL_REQUEST
+  WITHDRAWAL_EXECUTED
+  REFUND
+  ADJUSTMENT
+}
+
+model LedgerJournal {
+  id             String   @id @default(cuid())
+  kind           JournalKind
+  referenceType  String?
+  referenceId    String?
+  idempotencyKey String?  @unique
+  memo           String
+  postedById     String?
+  createdAt      DateTime @default(now())
+
+  postedBy User? @relation("PostedBy", fields: [postedById], references: [id])
+  entries  LedgerEntry[]
+
+  @@index([kind])
+  @@index([referenceType, referenceId])
+}
+
+enum EntryDirection {
+  DEBIT
+  CREDIT
+}
+
+model LedgerEntry {
+  id            String @id @default(cuid())
+  journalId     String
+  accountId     String
+  direction     EntryDirection
+  amountMinor   BigInt
+  accountCode   String
+  createdAt     DateTime @default(now())
+
+  journal LedgerJournal @relation(fields: [journalId], references: [id])
+  account LedgerAccount @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@index([journalId])
+}
+
+enum Provider {
+  MPESA_SANDBOX
+  MPESA_LIVE
+  MANUAL
+}
+
+enum FundingStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+model FundingRecord {
+  id             String  @id @default(cuid())
+  organizationId String
+  campaignId     String
+  provider       Provider
+  externalRef    String?
+  amountMinor    BigInt
+  currency       String  @default("KES")
+  status         FundingStatus @default(PENDING)
+  idempotencyKey String  @unique
+  journalId      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  campaign     Campaign     @relation(fields: [campaignId], references: [id])
+
+  @@index([campaignId])
+}
+
+enum WithdrawalStatus {
+  PENDING_REVIEW
+  APPROVED
+  PROCESSING
+  PAID
+  REJECTED
+  FAILED
+}
+
+model WithdrawalRequest {
+  id            String  @id @default(cuid())
+  workerId      String
+  amountMinor   BigInt
+  currency      String  @default("KES")
+  destination   String
+  status        WithdrawalStatus @default(PENDING_REVIEW)
+  providerRef   String?
+  reviewedById  String?
+  reviewNote    String?
+  journalId     String?
+  idempotencyKey String @unique
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  worker User @relation(fields: [workerId], references: [id])
+
+  @@index([workerId])
+  @@index([status])
+}
+
+enum TxnDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum PaymentTxnStatus {
+  INITIATED
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+model PaymentTransaction {
+  id          String  @id @default(cuid())
+  provider    Provider
+  direction   TxnDirection
+  externalRef String?
+  amountMinor BigInt
+  currency    String  @default("KES")
+  status      PaymentTxnStatus @default(INITIATED)
+  payload     Json?
+  journalId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([provider, externalRef])
+}
+
+// ─────────────────────────── AI orchestration ───────────────────────────
+
+enum AgentRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  TIMEOUT
+  UNAVAILABLE
+}
+
+model AgentRun {
+  id         String @id @default(cuid())
+  agent      String
+  entityType String?
+  entityId   String?
+  status     AgentRunStatus @default(QUEUED)
+  provider   String?
+  model      String?
+  input      Json?
+  output     Json?
+  tokensIn   Int    @default(0)
+  tokensOut  Int    @default(0)
+  latencyMs  Int?
+  error      String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  events AgentEvent[]
+
+  @@index([agent, status])
+  @@index([entityType, entityId])
+}
+
+model AgentEvent {
+  id      String @id @default(cuid())
+  runId   String
+  type    String
+  payload Json?
+  createdAt DateTime @default(now())
+
+  run AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+}
+
+model ModelConfig {
+  id         String  @id @default(cuid())
+  purpose    String  @unique
+  provider   String
+  model      String
+  temperature Float  @default(0.2)
+  maxTokens  Int     @default(2000)
+  enabled    Boolean @default(true)
+  updatedAt  DateTime @updatedAt
+}
+
+// ────────────────────────────── Platform ──────────────────────────────
+
+model Notification {
+  id     String  @id @default(cuid())
+  userId String
+  type   String
+  title  String
+  body   String
+  link   String?
+  readAt DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, readAt])
+}
+
+model AuditLog {
+  id        String @id @default(cuid())
+  actorId   String?
+  actorRole String?
+  action    String
+  entityType String
+  entityId  String?
+  metadata  Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [actorId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+}
+
+model IdempotencyRecord {
+  key          String @id
+  scope        String
+  responseHash String?
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+}

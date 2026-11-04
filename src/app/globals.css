@@ -1,0 +1,161 @@
+@tailwind ignore;
+:root {
+  --lh-green-900: #064e3b;
+  --lh-green-700: #047857;
+  --lh-green-600: #059669;
+  --lh-green-50: #ecfdf5;
+  --lh-amber-500: #f59e0b;
+  --lh-red-600: #dc2626;
+  --lh-slate-900: #0f172a;
+  --lh-slate-700: #334155;
+  --lh-slate-500: #64748b;
+  --lh-slate-300: #cbd5e1;
+  --lh-slate-100: #f1f5f9;
+  --lh-slate-50: #f8fafc;
+  --lh-white: #ffffff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--lh-slate-50);
+  color: var(--lh-slate-900);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+a { color: var(--lh-green-700); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+h1 { font-size: 1.6rem; margin: 0 0 0.5rem; letter-spacing: -0.02em; }
+h2 { font-size: 1.2rem; margin: 1.2rem 0 0.6rem; }
+h3 { font-size: 1.02rem; margin: 0.8rem 0 0.4rem; }
+p { margin: 0.4rem 0; }
+code { background: var(--lh-slate-100); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.85em; }
+
+/* ── Layout ── */
+.lh-shell { display: flex; min-height: 100vh; }
+.lh-sidebar {
+  width: 232px;
+  background: var(--lh-slate-900);
+  color: var(--lh-slate-300);
+  padding: 1.2rem 0.9rem;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+.lh-brand {
+  color: var(--lh-white);
+  font-weight: 700;
+  font-size: 1.12rem;
+  letter-spacing: -0.01em;
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.lh-brand-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--lh-green-600); display: inline-block; }
+.lh-nav { display: flex; flex-direction: column; gap: 0.15rem; }
+.lh-nav a {
+  color: var(--lh-slate-300);
+  padding: 0.45rem 0.7rem;
+  border-radius: 8px;
+  font-size: 0.92rem;
+}
+.lh-nav a:hover { background: rgba(255,255,255,0.07); color: var(--lh-white); text-decoration: none; }
+.lh-nav a[data-active="true"] { background: var(--lh-green-900); color: var(--lh-white); }
+.lh-sidebar-footer { margin-top: auto; font-size: 0.8rem; color: var(--lh-slate-500); }
+.lh-main { flex: 1; padding: 1.6rem 2rem; max-width: 1180px; min-width: 0; }
+@media (max-width: 800px) {
+  .lh-shell { flex-direction: column; }
+  .lh-sidebar { width: 100%; flex-direction: row; align-items: center; flex-wrap: wrap; }
+  .lh-nav { flex-direction: row; flex-wrap: wrap; }
+  .lh-sidebar-footer { display: none; }
+  .lh-main { padding: 1.2rem 1rem; }
+}
+
+/* ── Cards & grids ── */
+.lh-card {
+  background: var(--lh-white);
+  border: 1px solid var(--lh-slate-200, #e2e8f0);
+  border-radius: 12px;
+  padding: 1.1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+.lh-grid { display: grid; gap: 1rem; }
+.lh-grid-3 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.lh-grid-2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.lh-stat { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; }
+.lh-stat-label { color: var(--lh-slate-500); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.lh-muted { color: var(--lh-slate-500); font-size: 0.88rem; }
+
+/* ── Tables ── */
+.lh-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.lh-table th { text-align: left; color: var(--lh-slate-500); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--lh-slate-200, #e2e8f0); }
+.lh-table td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--lh-slate-100); vertical-align: top; }
+.lh-table tr:hover td { background: var(--lh-slate-50); }
+
+/* ── Badges ── */
+.lh-badge { display: inline-block; padding: 0.12rem 0.55rem; border-radius: 999px; font-size: 0.74rem; font-weight: 600; letter-spacing: 0.02em; }
+.lh-badge-green { background: var(--lh-green-50); color: var(--lh-green-700); }
+.lh-badge-amber { background: #fef3c7; color: #92400e; }
+.lh-badge-red { background: #fee2e2; color: #991b1b; }
+.lh-badge-slate { background: var(--lh-slate-100); color: var(--lh-slate-700); }
+
+/* ── Forms ── */
+.lh-form { display: flex; flex-direction: column; gap: 0.8rem; max-width: 460px; }
+.lh-form-wide { max-width: 680px; }
+.lh-label { font-size: 0.85rem; font-weight: 600; color: var(--lh-slate-700); }
+.lh-input, .lh-select, .lh-textarea {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--lh-slate-300);
+  border-radius: 8px;
+  font-size: 0.92rem;
+  font-family: inherit;
+  background: var(--lh-white);
+  color: var(--lh-slate-900);
+}
+.lh-textarea { min-height: 90px; resize: vertical; }
+.lh-input:focus, .lh-select:focus, .lh-textarea:focus {
+  outline: 2px solid var(--lh-green-600);
+  outline-offset: 0;
+  border-color: var(--lh-green-600);
+}
+.lh-field { display: flex; flex-direction: column; gap: 0.25rem; }
+
+/* ── Buttons ── */
+.lh-btn {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  background: var(--lh-green-700); color: var(--lh-white);
+  border: none; border-radius: 8px;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem; font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.lh-btn:hover { background: var(--lh-green-600); }
+.lh-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.lh-btn-secondary { background: var(--lh-slate-100); color: var(--lh-slate-900); }
+.lh-btn-secondary:hover { background: var(--lh-slate-300); }
+.lh-btn-danger { background: var(--lh-red-600); }
+.lh-btn-danger:hover { background: #b91c1c; }
+.lh-btn-sm { padding: 0.3rem 0.7rem; font-size: 0.82rem; }
+
+/* ── Alerts ── */
+.lh-alert { border-radius: 10px; padding: 0.7rem 1rem; font-size: 0.9rem; margin-bottom: 1rem; }
+.lh-alert-error { background: #fee2e2; color: #991b1b; }
+.lh-alert-info { background: #dbeafe; color: #1e40af; }
+.lh-alert-warn { background: #fef3c7; color: #92400e; }
+
+/* ── Landing ── */
+.lh-hero { background: linear-gradient(135deg, var(--lh-green-900), var(--lh-green-700)); color: var(--lh-white); border-radius: 16px; padding: 3rem 2.5rem; margin-bottom: 1.5rem; }
+.lh-hero h1 { font-size: 2.2rem; margin-bottom: 0.6rem; }
+.lh-hero p { color: rgba(255,255,255,0.85); max-width: 640px; font-size: 1.02rem; }
+.lh-landing-nav { display: flex; align-items: center; justify-content: space-between; padding: 1rem 0; }
+.lh-disclaimer { font-size: 0.78rem; color: var(--lh-slate-500); }
+
+.lh-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.lh-spacer { flex: 1; }
+.lh-mono { font-variant-numeric: tabular-nums; }
