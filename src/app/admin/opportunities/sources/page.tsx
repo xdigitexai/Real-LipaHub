@@ -11,7 +11,7 @@ export const metadata = { title: "Opportunity sources — LipaHub AI" };
 export default async function SourcesPage() {
   const ctx = await getAuthContext();
   const sources = await prisma.opportunitySource.findMany({ orderBy: { createdAt: "desc" } });
-  const aiReady = isModelConfigured();
+  const aiReady = await isModelConfigured();
 
   return (
     <Shell nav={[

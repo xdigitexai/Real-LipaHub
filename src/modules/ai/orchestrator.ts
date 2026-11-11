@@ -88,14 +88,20 @@ export async function runAgent<T>(spec: AgentSpec<T>): Promise<AgentOutcome<T>> 
       .catch(() => {});
   };
 
-  const maxRetries = spec.maxRetries ?? 1;
+  // Two retries by default: the first failure often comes from shape drift
+  // (e.g. a string where an array is required). Retries feed the exact
+  // validation error back so the model can self-correct.
+  const maxRetries = spec.maxRetries ?? 2;
   let lastError: string | undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const correction = lastError
+      ? `\n\nIMPORTANT: Your previous reply failed schema validation:\n${lastError.slice(0, 700)}\nFix exactly these problems and reply with ONLY the JSON object.`
+      : "";
     const request: CompletionRequest = {
       purpose: spec.purpose,
       system: spec.system,
-      user: attempt === 0 ? spec.user : `${spec.user}\n\nIMPORTANT: Your previous reply was not valid JSON matching the schema. Reply with ONLY the JSON object.`,
+      user: `${spec.user}${correction}`,
       json: true,
       maxTokens: spec.maxTokens,
       temperature: attempt === 0 ? spec.temperature : 0,
@@ -139,8 +145,8 @@ export async function runAgent<T>(spec: AgentSpec<T>): Promise<AgentOutcome<T>> 
         latencyMs: result.latencyMs,
       };
     } catch (e) {
-      lastError = `Invalid structured output: ${String((e as Error).message ?? e).slice(0, 400)}`;
-      logger.warn("agent_invalid_output", { agent: spec.agent, attempt, error: lastError });
+      lastError = `Invalid structured output: ${String((e as Error).message ?? e).slice(0, 700)}`;
+      logger.warn("agent_invalid_output", { agent: spec.agent, attempt, error: lastError.slice(0, 500) });
     }
   }
 

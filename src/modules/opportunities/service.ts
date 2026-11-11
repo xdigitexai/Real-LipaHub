@@ -115,6 +115,18 @@ export function parseHtmlListings(html: string, sourceUrl: string): RawListing[]
   return listings;
 }
 
+/** Keeps the first occurrence per signal name (hard rules > model > assessment). */
+function dedupeRiskSignals(
+  signals: Array<{ signal: string; severity: "INFO" | "WARNING" | "CRITICAL"; explanation: string }>,
+): Array<{ signal: string; severity: "INFO" | "WARNING" | "CRITICAL"; explanation: string }> {
+  const seen = new Set<string>();
+  return signals.filter((s) => {
+    if (seen.has(s.signal)) return false;
+    seen.add(s.signal);
+    return true;
+  }).slice(0, 16);
+}
+
 function decodeEntities(s: string | undefined): string {
   if (!s) return "";
   return s
@@ -254,8 +266,29 @@ export async function ingestSource(input: {
       severity: "WARNING" as const,
       explanation: s,
     }));
-    const signals = [...hard.signals, ...aiSignals];
-    const score = Math.min(100, hard.score + (research.ok ? 0 : 5)); // unknown-provenance bump when AI absent
+
+    // Trust & Safety Agent — independent assessment. Its score may raise the
+    // verdict but never below the deterministic floor (runTrustSafetyAgent
+    // already enforces that internally; we merge again here).
+    const trust = research.ok
+      ? await runTrustSafetyAgent({
+          opportunityId: row.id,
+          sourceTrustLevel: source.trustLevel,
+          title,
+          description,
+          rewardText,
+          eligibility,
+        })
+      : null;
+
+    const trustSignals = trust?.ok ? trust.output.signals : [];
+    const trustScore = trust?.ok ? trust.output.riskScore : 0;
+    const assessmentSignal = trust?.ok
+      ? [{ signal: "ai-assessment", severity: "INFO" as const, explanation: trust.output.explanation.slice(0, 800) }]
+      : [];
+
+    const signals = dedupeRiskSignals([...hard.signals, ...trustSignals, ...assessmentSignal, ...aiSignals]);
+    const score = Math.min(100, Math.max(hard.score, trustScore) + (research.ok ? 0 : 5)); // unknown-provenance bump when AI absent
     const band = bandForScore(score);
 
     const autoCritical = signals.some((s) => s.severity === "CRITICAL");

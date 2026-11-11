@@ -23,8 +23,18 @@ export async function GET() {
     checks.queue = { status: "degraded", error: String(e).slice(0, 120) };
   }
 
-  const aiConfigured = Boolean(process.env.LIPAHUB_AI_API_KEY);
-  checks.ai = { status: aiConfigured ? "configured" : "not-configured", note: aiConfigured ? undefined : "agents fall back to deterministic + human review" };
+  try {
+    const { isModelConfigured, resolveModelConfig } = await import("@/modules/ai/adapter");
+    const [aiConfigured, cfg] = await Promise.all([isModelConfigured(), resolveModelConfig("research")]);
+    checks.ai = {
+      status: aiConfigured ? "configured" : "not-configured",
+      provider: cfg.provider,
+      model: cfg.model,
+      note: aiConfigured ? undefined : "agents fall back to deterministic + human review",
+    };
+  } catch (e) {
+    checks.ai = { status: "error", error: String(e).slice(0, 120) };
+  }
 
   // Provider config visibility (boolean only — the key itself is never exposed)
   checks.payments = { provider: "xdigitex", configured: Boolean(process.env.XDIGITEX_PAY_API_KEY) };

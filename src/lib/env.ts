@@ -30,11 +30,19 @@ export const env = {
   isProd: process.env.NODE_ENV === "production",
 
   ai: {
-    provider: optional("LIPAHUB_AI_PROVIDER", "zai"),
+    provider: optional("LIPAHUB_AI_PROVIDER", "deepseek"),
     baseUrl: optional("LIPAHUB_AI_BASE_URL", "https://api.z.ai/api/paas/v4"),
     apiKey: optional("LIPAHUB_AI_API_KEY", ""),
     model: optional("LIPAHUB_AI_MODEL", "glm-5.3-flash"),
     timeoutMs: int("LIPAHUB_AI_TIMEOUT_MS", 45_000),
+  },
+
+  // DeepSeek — OpenAI-compatible provider (default for all agent purposes).
+  // Key read from env at call time; never stored in DB, never logged.
+  deepseek: {
+    apiKey: optional("DEEPSEEK_API_KEY", ""),
+    baseUrl: optional("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+    timeoutMs: int("DEEPSEEK_TIMEOUT_MS", 60_000),
   },
 
   finance: {

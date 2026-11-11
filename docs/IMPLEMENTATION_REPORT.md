@@ -1,7 +1,70 @@
 # LipaHub AI — Implementation Report
 
-> Milestone 0: 2026-11-04 · Milestone 1 (Xdigitex Pay): 2026-11-05
-> Status: foundation + payment-provider integration **implemented, tested and browser-verified**
+> Milestone 0: 2026-11-04 · Milestone 1 (Xdigitex Pay): 2026-11-05 · Milestone 1.1 (DeepSeek AI): 2026-11-12
+> Status: foundation + payment-provider integration + live AI **implemented, tested and verified**
+
+---
+
+# Milestone 1.1 — Live AI provider: DeepSeek (2026-11-12)
+
+## What changed
+
+- **`DeepSeekAdapter`** implements the existing `ModelAdapter` contract (OpenAI-compatible
+  `/chat/completions`), registered alongside the Z.ai adapter. Provider/model are still resolved per
+  purpose from the admin-editable `ModelConfig` table — no call site references a model name.
+- **Default model: `deepseek-flash`** (DeepSeek-V4.1-Flash; account `/models` also exposes
+  `deepseek-v4-pro`). One shared OpenAI-compatible transport is used by both HTTP adapters.
+- **Key handling:** `DEEPSEEK_API_KEY` is read from env at call time only. It is not stored in the
+  database, never logged, never sent to the browser, and `.env` is git-ignored (verified with
+  `git check-ignore` and a tracked-file scan for the key).
+- **Health/diagnostics:** `GET /api/health` now reports `ai.provider` and `ai.model` and is
+  adapter-agnostic (`isModelConfigured(purpose)` checks the resolved adapter's credentials).
+- **Trust & Safety Agent is now wired into the discovery pipeline.** Previously ingest used
+  deterministic hard rules + research-derived signals only. Ingest now calls `runTrustSafetyAgent`,
+  merges its score with the deterministic floor (max), records its signals plus an
+  `ai-assessment` entry, and may raise the verdict to CRITICAL. The AI can never lower a hard-rule
+  CRITICAL floor.
+- **Orchestrator hardening (found by live testing):** DeepSeek returned common shape drift
+  (string instead of array, off-enum category) and a single retry failed. Retries now default to 2
+  and feed the exact zod validation error back to the model for self-correction; prompts state
+  exact types/enums. Runs still fail honestly after retries rather than accepting invalid output.
+- **Ops scripts:** `scripts/set-ai-provider.ts` (set provider/model for all purposes),
+  `scripts/verify-ai.ts` (live agent smoke check), `scripts/verify-live-pipeline.ts`
+  (source → ingest → moderation → catalogue with the real provider).
+
+## Verified live (real DeepSeek calls — not mocked)
+
+| Check | Result |
+|---|---|
+| Research Agent on a legitimate listing | `SUCCEEDED` · deepseek-flash · 323→694 tokens · extracts category `transcription`, requirements, reward terms |
+| Trust & Safety Agent on a scam listing | `SUCCEEDED` · riskScore 100 / CRITICAL / `recommendApproval=false`; explanation cites advance-fee + guaranteed-income + crypto-only |
+| Full pipeline: benign listing | risk 10→18/LOW, confidence 88%, `PENDING_REVIEW` → moderator approval → published to catalogue |
+| Full pipeline: scam listing | risk 100/CRITICAL, signals include `upfront-payment`, `crypto-only`, `ai-assessment`; auto-note "recommend rejection" |
+| Admin UI (`/admin/agents`, `/admin/opportunities/moderation`) | renders provider `deepseek-flash`, 40 `SUCCEEDED` runs (incl. `trust-safety`), `ai-assessment` signals |
+| `/api/health` | `ai: {status: "configured", provider: "deepseek", model: "deepseek-flash"}` |
+
+## Test isolation defect found & fixed
+
+Because the live DB now points at DeepSeek, the verification pipeline began making **real API calls
+from unit tests** (one test took 35s). Fixed with `tests/setup.ts`: the adapter registry is cleared
+before every test file and stubs are opt-in per test. The opportunities suite also now restores
+`ModelConfig` in `afterAll` (it previously leaked `stub` into the live config). Full suite: **54/54
+pass**, no network access, config preserved afterwards.
+
+## Configuration reference
+
+```
+DEEPSEEK_API_KEY=sk-...            # server-side only; absent → agents record UNAVAILABLE
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_TIMEOUT_MS=60000
+# Alternative provider (disabled while empty):
+LIPAHUB_AI_PROVIDER=zai
+LIPAHUB_AI_API_KEY=
+LIPAHUB_AI_MODEL=glm-5.3-flash
+```
+
+Switch provider/model at runtime (admin table equivalent): `npx tsx scripts/set-ai-provider.ts deepseek deepseek-v4-pro`
+(or edit rows on `/admin/agents`, which shows provider, model, temperature and run statistics).
 
 ---
 

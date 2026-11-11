@@ -2,15 +2,13 @@
  * Opportunity intelligence tests — dedupe, hard rules, moderation gate,
  * AI-unavailable honesty. AI is stubbed via adapter replacement.
  */
-import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "@/lib/db";
 import { ensureChartOfAccounts } from "@/modules/finance";
 import { createSource, ingestSource, moderateOpportunity, listCatalogue, titleFuzzyHash, parseRss } from "@/modules/opportunities/service";
-import { hardRiskRules, bandForScore, runResearchAgent } from "@/modules/ai/agents";
-import { setAdaptersForTesting, type ModelAdapter, type CompletionResult, ModelUnavailableError } from "@/modules/ai/adapter";
+import { hardRiskRules, bandForScore, runResearchAgent, type ResearchOutput } from "@/modules/ai/agents";
+import { setAdaptersForTesting, ZaiGlmAdapter, DeepSeekAdapter, type ModelAdapter, type CompletionResult } from "@/modules/ai/adapter";
 import { extractJson } from "@/modules/ai/orchestrator";
-import type { z } from "zod";
-import type { ResearchOutput } from "@/modules/ai/agents";
 
 const unique = (p: string) => `${p}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -20,23 +18,39 @@ const LISTING = {
   url: "https://scam.example.com/listing/1",
 };
 
-function fakeResearchAdapter(output: Partial<ResearchOutput>): ModelAdapter {
+function fakeResearchAdapter(
+  output: Partial<ResearchOutput>,
+  trustOutput?: { riskScore: number; riskBand: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; signals: Array<{ signal: string; severity: "INFO" | "WARNING" | "CRITICAL"; explanation: string }>; explanation?: string; recommendApproval?: boolean },
+): ModelAdapter {
   return {
     provider: "stub",
     async complete(req: { purpose: string; user: string }): Promise<CompletionResult> {
-      // Echo the raw listing title so every ingest row is unique across
-      // tests AND across repeated runs against the same database.
-      const rawTitle = req.user.match(/Listing title: (.*)/)?.[1] ?? "Stub listing title";
-      const full: ResearchOutput = {
-        title: output.title ?? rawTitle,
-        description: output.description ?? `Stub description for: ${rawTitle}`,
-        category: output.category ?? "microtask",
-        rewardText: output.rewardText ?? "500 KES per task",
-        requirements: output.requirements ?? ["Complete the form"],
-        eligibility: output.eligibility ?? "Open to Kenya",
-        geoRestrictions: output.geoRestrictions ?? [],
-        suspiciousSignals: output.suspiciousSignals ?? [],
-      };
+      let full: unknown;
+      if (req.purpose === "trust-safety") {
+        // The ingest pipeline calls the Trust & Safety agent after research;
+        // the stub returns a well-formed assessment so the merge path is tested.
+        full = {
+          riskScore: trustOutput?.riskScore ?? 20,
+          riskBand: trustOutput?.riskBand ?? "LOW",
+          signals: trustOutput?.signals ?? [],
+          explanation: trustOutput?.explanation ?? "No fraud indicators found in the listing.",
+          recommendApproval: trustOutput?.recommendApproval ?? true,
+        };
+      } else {
+        // Echo the raw listing title so every ingest row is unique across
+        // tests AND across repeated runs against the same database.
+        const rawTitle = req.user.match(/Listing title: (.*)/)?.[1] ?? "Stub listing title";
+        full = {
+          title: output.title ?? rawTitle,
+          description: output.description ?? `Stub description for: ${rawTitle}`,
+          category: output.category ?? "microtask",
+          rewardText: output.rewardText ?? "500 KES per task",
+          requirements: output.requirements ?? ["Complete the form"],
+          eligibility: output.eligibility ?? "Open to Kenya",
+          geoRestrictions: output.geoRestrictions ?? [],
+          suspiciousSignals: output.suspiciousSignals ?? [],
+        } satisfies ResearchOutput;
+      }
       return {
         text: JSON.stringify(full),
         provider: "stub",
@@ -51,6 +65,16 @@ function fakeResearchAdapter(output: Partial<ResearchOutput>): ModelAdapter {
 
 beforeAll(async () => {
   await ensureChartOfAccounts();
+  // Snapshot the live config so afterAll can restore it exactly.
+  const existing = await prisma.modelConfig.findMany({
+    where: { purpose: { in: ["research", "trust-safety"] } },
+  });
+  for (const row of existing) {
+    ORIGINAL_MODEL_CONFIGS.push({
+      purpose: row.purpose, provider: row.provider, model: row.model,
+      enabled: row.enabled, temperature: row.temperature, maxTokens: row.maxTokens,
+    });
+  }
   // Ensure the stub provider is what purposes resolve to
   await prisma.modelConfig.upsert({
     where: { purpose: "research" },
@@ -64,8 +88,25 @@ beforeAll(async () => {
   });
 });
 
-afterEach(() => {
-  // restore "no adapters" state between tests
+// Tests must not leak the stub provider into the real database config.
+const ORIGINAL_MODEL_CONFIGS: Array<{ purpose: string; provider: string; model: string; enabled: boolean; temperature: number; maxTokens: number }> = [];
+
+afterAll(async () => {
+  for (const original of ORIGINAL_MODEL_CONFIGS) {
+    await prisma.modelConfig.upsert({
+      where: { purpose: original.purpose },
+      update: {
+        provider: original.provider,
+        model: original.model,
+        enabled: original.enabled,
+        temperature: original.temperature,
+        maxTokens: original.maxTokens,
+      },
+      create: original,
+    });
+  }
+  // Restore the real adapter registry for any later test file in the same process.
+  setAdaptersForTesting(new Map([["zai", new ZaiGlmAdapter()], ["deepseek", new DeepSeekAdapter()]]));
 });
 
 describe("hard risk rules (deterministic, model-independent)", () => {
@@ -172,6 +213,41 @@ describe("ingest pipeline", () => {
     expect(row!.confidence).toBeLessThan(30);
   });
 });
+
+describe("trust & safety agent merge", () => {
+  it("AI assessment can raise risk above the deterministic floor and block auto-approval", async () => {
+    setAdaptersForTesting(new Map([["stub", fakeResearchAdapter({}, {
+      riskScore: 88,
+      riskBand: "CRITICAL",
+      signals: [{ signal: "identity-harvesting", severity: "CRITICAL", explanation: "Listing asks for ID documents before any work is agreed." }],
+      explanation: "Requests identity documents upfront for verification before any contract.",
+      recommendApproval: false,
+    })]]));
+    const admin = await prisma.user.create({
+      data: { email: unique("tsadm"), emailNormalized: unique("tsadm"), passwordHash: "x", name: "TS Admin", role: "ADMIN" },
+    });
+    const source = await createSource({ name: unique("TrustSource"), kind: "MANUAL" });
+    const stamp = Date.now();
+    await ingestSource({
+      sourceId: source.id,
+      listings: [{
+        title: `Simple typing work from home ${stamp}`,
+        body: "Type documents from home. Send a copy of your national ID and phone number for verification before starting. Weekly payment by bank transfer.",
+        url: `https://trust-merge.example.com/${stamp}`,
+      }],
+      actorId: admin.id,
+    });
+    const row = await prisma.discoveredOpportunity.findFirstOrThrow({ where: { sourceId: source.id } });
+    expect(row.riskScore).toBeGreaterThanOrEqual(88);
+    expect(row.riskBand).toBe("CRITICAL");
+    expect(row.status).toBe("PENDING_REVIEW");
+    expect(row.reviewNote).toContain("recommend rejection");
+    const signals = row.riskSignals as Array<{ signal: string }>;
+    expect(signals.map((s) => s.signal)).toContain("identity-harvesting");
+    expect(signals.map((s) => s.signal)).toContain("ai-assessment");
+  });
+});
+
 
 describe("rss parsing", () => {
   it("extracts items from an RSS feed", () => {

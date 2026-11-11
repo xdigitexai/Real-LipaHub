@@ -32,21 +32,20 @@ async function main() {
   logger.info("seed_admin_ready", { email: adminEmail });
 
   // AI model defaults — admin-editable in the dashboard; adapter reads DB first.
-  const defaults = [
-    { purpose: "research", model: process.env.LIPAHUB_AI_MODEL ?? "glm-5.3-flash" },
-    { purpose: "trust-safety", model: process.env.LIPAHUB_AI_MODEL ?? "glm-5.3-flash" },
-    { purpose: "evidence-verification", model: process.env.LIPAHUB_AI_MODEL ?? "glm-5.3-flash" },
-    { purpose: "matching", model: process.env.LIPAHUB_AI_MODEL ?? "glm-5.3-flash" },
-    { purpose: "support", model: process.env.LIPAHUB_AI_MODEL ?? "glm-5.3-flash" },
-  ];
-  for (const d of defaults) {
+  // Provider choice follows env: DeepSeek when its key is present, else Z.ai.
+  const useDeepSeek = Boolean(process.env.DEEPSEEK_API_KEY);
+  const provider = useDeepSeek ? "deepseek" : "zai";
+  const model = useDeepSeek ? "deepseek-flash" : (process.env.LIPAHUB_AI_MODEL ?? "glm-5.3-flash");
+  const purposes = ["research", "trust-safety", "evidence-verification", "matching", "support"];
+  for (const purpose of purposes) {
+    const pricing = purpose === "evidence-verification" ? { temperature: 0.0 } : {};
     await prisma.modelConfig.upsert({
-      where: { purpose: d.purpose },
-      update: {},
-      create: { purpose: d.purpose, provider: "zai", model: d.model },
+      where: { purpose },
+      update: {}, // admin-managed at runtime; seeding never overrides
+      create: { purpose, provider, model, ...pricing },
     });
   }
-  logger.info("seed_model_configs_ok", { count: defaults.length });
+  logger.info("seed_model_configs_ok", { count: purposes.length, provider, model });
 
   logger.info("seed_done", { adminId: admin.id });
   console.log(`\nAdmin login: ${adminEmail} / ${process.env.LIPAHUB_ADMIN_PASSWORD ? "(from env)" : adminPassword}\n`);

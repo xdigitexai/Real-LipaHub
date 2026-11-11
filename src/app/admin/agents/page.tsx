@@ -12,7 +12,7 @@ export default async function AdminAgentsPage() {
     prisma.agentRun.findMany({ orderBy: { createdAt: "desc" }, take: 60 }),
     prisma.modelConfig.findMany({ orderBy: { purpose: "asc" } }),
   ]);
-  const aiReady = isModelConfigured();
+  const aiReady = await isModelConfigured();
 
   const byAgent = new Map<string, { total: number; succeeded: number; unavailable: number; failed: number }>();
   for (const r of runs) {
