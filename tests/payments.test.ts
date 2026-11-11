@@ -303,7 +303,8 @@ describe("deposits via Xdigitex Pay", () => {
       where: { internalRef: res.internalRef },
       data: { createdAt: new Date(Date.now() - 5 * 60_000) },
     });
-    const report = await reconcilePendingPayments();
+    // Scoped sweep: the global sweep may include aged records from other orgs.
+    const report = await reconcilePendingPayments({ organizationId: orgIdA });
     expect(report.depositsSettled).toBeGreaterThanOrEqual(1);
     const after = await prisma.$transaction((tx) => orgWalletBalance(tx, orgIdA));
     expect(after - before).toBe(toMinor(616));
@@ -381,7 +382,7 @@ describe("withdrawals via Xdigitex Pay", () => {
     const item = state.withdrawals.get(submitted.providerRef!)!;
     item.status = "completed";
     await prisma.paymentRecord.updateMany({ where: { internalRef: `WDR-INT-${w.id}` }, data: { createdAt: new Date(Date.now() - 5 * 60_000) } });
-    const report = await reconcilePendingPayments();
+    const report = await reconcilePendingPayments({ workerId });
     expect(report.withdrawalsSettled).toBeGreaterThanOrEqual(1);
 
     const w2 = await prisma.withdrawalRequest.findUniqueOrThrow({ where: { id: w.id } });
@@ -441,7 +442,7 @@ describe("withdrawals via Xdigitex Pay", () => {
       where: { internalRef: `WDR-INT-${w.id}` },
       data: { createdAt: new Date(Date.now() - 40 * 60_000) },
     });
-    const report = await reconcilePendingPayments();
+    const report = await reconcilePendingPayments({ workerId });
     expect(report.withdrawalsUncertain).toBeGreaterThanOrEqual(1);
     const record = await prisma.paymentRecord.findUniqueOrThrow({ where: { internalRef: `WDR-INT-${w.id}` } });
     expect(record.status).toBe("UNCERTAIN");

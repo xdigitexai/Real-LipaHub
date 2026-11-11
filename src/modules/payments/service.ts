@@ -527,7 +527,16 @@ export interface ReconcileReport {
   providerErrors: number;
 }
 
-export async function reconcilePendingPayments(): Promise<ReconcileReport> {
+export interface ReconcileOptions {
+  /** Scope to one organization (targeted admin/test sweeps). */
+  organizationId?: string;
+  /** Scope to one worker's withdrawals. */
+  workerId?: string;
+  /** Max records per kind per sweep (default 100). */
+  limit?: number;
+}
+
+export async function reconcilePendingPayments(opts: ReconcileOptions = {}): Promise<ReconcileReport> {
   const report: ReconcileReport = {
     depositsChecked: 0, depositsSettled: 0, depositsFailed: 0,
     withdrawalsChecked: 0, withdrawalsSettled: 0, withdrawalsReversed: 0,
@@ -537,11 +546,21 @@ export async function reconcilePendingPayments(): Promise<ReconcileReport> {
   if (!client.isConfigured()) return report;
   const cutoff = new Date(Date.now() - RECONCILE_MIN_AGE_MINUTES * 60_000);
   const uncertainCutoff = new Date(Date.now() - WITHDRAWAL_UNCERTAIN_AFTER_MINUTES * 60_000);
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
 
   // Deposits: authoritative per-reference status endpoint.
+  // Oldest first so orphaned records cannot starve newly-aged ones out of
+  // the batch; 404s (reference unknown to the provider) are resolved to
+  // UNCERTAIN for admin review rather than retried forever.
   const pendingDeposits = await prisma.paymentRecord.findMany({
-    where: { kind: "DEPOSIT", status: { in: ["PENDING", "PROCESSING"] }, createdAt: { lt: cutoff } },
-    take: 50,
+    where: {
+      kind: "DEPOSIT",
+      status: { in: ["PENDING", "PROCESSING"] },
+      createdAt: { lt: cutoff },
+      ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),
+    },
+    orderBy: { createdAt: "asc" },
+    take: limit,
   });
   for (const record of pendingDeposits) {
     if (!record.providerRef) continue;
@@ -550,7 +569,7 @@ export async function reconcilePendingPayments(): Promise<ReconcileReport> {
       const status = await client.getPaymentStatus(record.providerRef);
       const verifiedMinor = BigInt(Math.round(status.amount * 100));
       if (verifiedMinor !== record.amountMinor || status.currency.toUpperCase() !== record.currency.toUpperCase()) {
-        // Mismatch found by reconciliation → leave pending, surface for admin.
+        // Mismatch found by reconciliation → surface for admin, never credit.
         await prisma.paymentRecord.update({ where: { id: record.id }, data: { status: "UNCERTAIN", failureReason: `reconciliation mismatch: amount/currency differ from provider` } });
         continue;
       }
@@ -562,14 +581,30 @@ export async function reconcilePendingPayments(): Promise<ReconcileReport> {
         report.depositsFailed++;
       }
     } catch (e) {
+      if (e instanceof ProviderError && e.kind === "HTTP" && e.httpStatus === 404) {
+        // The provider does not know this reference at all. Never credit;
+        // park it for admin review so it cannot clog every future sweep.
+        await prisma.paymentRecord.update({
+          where: { id: record.id },
+          data: { status: "UNCERTAIN", failureReason: "provider has no record of this reference (404) — admin review required" },
+        });
+        report.providerErrors++;
+        continue;
+      }
       report.providerErrors++; // provider downtime/timeout — retried next sweep
     }
   }
 
   // Withdrawals: paginated history (no single-status endpoint documented).
   const pendingWithdrawals = await prisma.paymentRecord.findMany({
-    where: { kind: "WITHDRAWAL", status: { in: ["PENDING", "PROCESSING"] }, createdAt: { lt: cutoff } },
-    take: 50,
+    where: {
+      kind: "WITHDRAWAL",
+      status: { in: ["PENDING", "PROCESSING"] },
+      createdAt: { lt: cutoff },
+      ...(opts.workerId ? { workerId: opts.workerId } : {}),
+    },
+    orderBy: { createdAt: "asc" },
+    take: limit,
   });
   if (pendingWithdrawals.length > 0) {
     let historyItems: Array<{ reference: string; status: string; amount?: number; fee?: number; currency?: string }> = [];
